@@ -1,4 +1,4 @@
-package phys_location
+package cdn
 
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
@@ -20,117 +20,233 @@ package phys_location
  */
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
 
 	"github.com/apache/incubator-trafficcontrol/lib/go-log"
 	"github.com/apache/incubator-trafficcontrol/lib/go-tc"
-	"github.com/apache/incubator-trafficcontrol/traffic_ops/traffic_ops_golang/api"
+
 	"github.com/apache/incubator-trafficcontrol/traffic_ops/traffic_ops_golang/dbhelpers"
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 )
 
-const PhysLocationsPrivLevel = 10
+//we need a type alias to define functions on
+type TOCDN tc.CDN
 
-func PhysLocationsHandler(db *sqlx.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		handleErr := func(err error, status int) {
-			log.Errorf("%v %v\n", r.RemoteAddr, err)
-			w.WriteHeader(status)
-			fmt.Fprintf(w, http.StatusText(status))
-		}
+//the refType is passed into the handlers where a copy of its type is used to decode the json.
+var refType = TOCDN(tc.CDN{})
 
-		ctx := r.Context()
-		pathParams, err := api.GetPathParams(ctx)
-		if err != nil {
-			handleErr(err, http.StatusInternalServerError)
-			return
-		}
-
-		// Load the PathParams into the query parameters for pass through
-		q := r.URL.Query()
-		for k, v := range pathParams {
-			q.Set(k, v)
-		}
-		resp, err := getPhysLocationsResponse(q, db)
-		if err != nil {
-			handleErr(err, http.StatusInternalServerError)
-			return
-		}
-
-		respBts, err := json.Marshal(resp)
-		if err != nil {
-			handleErr(err, http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, "%s", respBts)
-	}
+func GetRefType() *TOCDN {
+	return &refType
 }
 
-func getPhysLocationsResponse(q url.Values, db *sqlx.DB) (*tc.PhysLocationsResponse, error) {
-	physLocations, err := getPhysLocations(q, db)
+//Implementation of the Identifier, Validator interface functions
+func (cdn *TOCDN) GetID() int {
+	return cdn.ID
+}
+
+func (cdn *TOCDN) GetAuditName() string {
+	return cdn.Name
+}
+
+func (cdn *TOCDN) GetType() string {
+	return "cdn"
+}
+
+func (cdn *TOCDN) SetID(i int) {
+	cdn.ID = i
+}
+
+func (cdn *TOCDN) Validate() []error {
+	errs := []error{}
+	if len(cdn.Name) < 1 {
+		errs = append(errs, errors.New(`CDN 'name' is required.`))
+	}
+	if len(cdn.DomainName) < 1 {
+		errs = append(errs, errors.New("Domain Name is required."))
+	}
+	return errs
+}
+
+//The TOCDN implementation of the Updater interface
+//all implementations of Updater should use transactions and return the proper errorType
+//ParsePQUniqueConstraintError is used to determine if a cdn with conflicting values exists
+//if so, it will return an errorType of DataConflict and the type should be appended to the
+//generic error message returned
+func (cdn *TOCDN) Update(db *sqlx.DB, ctx context.Context) (error, tc.ApiErrorType) {
+	tx, err := db.Beginx()
+	defer func() {
+		if tx == nil {
+			return
+		}
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		tx.Commit()
+	}()
+
 	if err != nil {
-		return nil, fmt.Errorf("getting physLocations response: %v", err)
+		log.Error.Printf("could not begin transaction: %v", err)
+		return tc.DBError, tc.SystemError
 	}
-
-	resp := tc.PhysLocationsResponse{
-		Response: physLocations,
-	}
-	return &resp, nil
-}
-
-func getPhysLocations(v url.Values, db *sqlx.DB) ([]tc.PhysLocation, error) {
-	var rows *sqlx.Rows
-	var err error
-
-	// Query Parameters to Database Query column mappings
-	// see the fields mapped in the SQL query
-	queryParamsToQueryCols := map[string]string{
-		"id":     "pl.id",
-		"region": "pl.region",
-	}
-
-	query, queryValues := dbhelpers.BuildQuery(v, selectPhysLocationsQuery(), queryParamsToQueryCols)
-
-	rows, err = db.NamedQuery(query, queryValues)
+	log.Debugf("about to run exec query: %s with cdn: %++v", updateCDNQuery(), cdn)
+	resultRows, err := tx.NamedQuery(updateCDNQuery(), cdn)
 	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	physLocations := []tc.PhysLocation{}
-	for rows.Next() {
-		var s tc.PhysLocation
-		if err = rows.StructScan(&s); err != nil {
-			return nil, fmt.Errorf("getting physLocations: %v", err)
+		if err, ok := err.(*pq.Error); ok {
+			err, eType := dbhelpers.ParsePQUniqueConstraintError(err)
+			if eType == tc.DataConflictError {
+				return errors.New("a cdn with " + err.Error()), eType
+			}
+			return err, eType
+		} else {
+			log.Errorf("received error: %++v from update execution", err)
+			return tc.DBError, tc.SystemError
 		}
-		physLocations = append(physLocations, s)
 	}
-	return physLocations, nil
+	var lastUpdated tc.Time
+	rowsAffected := 0
+	for resultRows.Next() {
+		rowsAffected++
+		if err := resultRows.Scan(&lastUpdated); err != nil {
+			log.Error.Printf("could not scan lastUpdated from insert: %s\n", err)
+			return tc.DBError, tc.SystemError
+		}
+	}
+	log.Debugf("lastUpdated: %++v", lastUpdated)
+	cdn.LastUpdated = lastUpdated
+	if rowsAffected != 1 {
+		if rowsAffected < 1 {
+			return errors.New("no cdn found with this id"), tc.DataMissingError
+		} else {
+			return fmt.Errorf("this update affected too many rows: %d", rowsAffected), tc.SystemError
+		}
+	}
+	return nil, tc.NoError
 }
 
-func selectPhysLocationsQuery() string {
+//The TOCDN implementation of the Inserter interface
+//all implementations of Inserter should use transactions and return the proper errorType
+//ParsePQUniqueConstraintError is used to determine if a cdn with conflicting values exists
+//if so, it will return an errorType of DataConflict and the type should be appended to the
+//generic error message returned
+//The insert sql returns the id and lastUpdated values of the newly inserted cdn and have
+//to be added to the struct
+func (cdn *TOCDN) Insert(db *sqlx.DB, ctx context.Context) (error, tc.ApiErrorType) {
+	tx, err := db.Beginx()
+	defer func() {
+		if tx == nil {
+			return
+		}
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		tx.Commit()
+	}()
 
-	query := `SELECT
-pl.address,
-pl.city,
-COALESCE(pl.comments, '') as comments,
-COALESCE(pl.email, '') as email,
-pl.id,
-pl.last_updated,
-pl.name,
-COALESCE(pl.phone, '') as phone,
-COALESCE(pl.poc, '') as poc,
-pl.region as regionid,
-r.name as region,
-pl.short_name,
-pl.state,
-pl.zip
-FROM phys_location pl
-JOIN region r ON pl.region = r.id`
+	if err != nil {
+		log.Error.Printf("could not begin transaction: %v", err)
+		return tc.DBError, tc.SystemError
+	}
+	resultRows, err := tx.NamedQuery(insertCDNQuery(), cdn)
+	if err != nil {
+		if err, ok := err.(*pq.Error); ok {
+			err, eType := dbhelpers.ParsePQUniqueConstraintError(err)
+			return errors.New("a cdn with " + err.Error()), eType
+		} else {
+			log.Errorf("received non pq error: %++v from create execution", err)
+			return tc.DBError, tc.SystemError
+		}
+	}
+	var id int
+	var lastUpdated tc.Time
+	rowsAffected := 0
+	for resultRows.Next() {
+		rowsAffected++
+		if err := resultRows.Scan(&id, &lastUpdated); err != nil {
+			log.Error.Printf("could not scan id from insert: %s\n", err)
+			return tc.DBError, tc.SystemError
+		}
+	}
+	if rowsAffected == 0 {
+		err = errors.New("no cdn was inserted, no id was returned")
+		log.Errorln(err)
+		return tc.DBError, tc.SystemError
+	} else if rowsAffected > 1 {
+		err = errors.New("too many ids returned from cdn insert")
+		log.Errorln(err)
+		return tc.DBError, tc.SystemError
+	}
+	cdn.SetID(id)
+	cdn.LastUpdated = lastUpdated
+	return nil, tc.NoError
+}
+
+//The CDN implementation of the Deleter interface
+//all implementations of Deleter should use transactions and return the proper errorType
+func (cdn *TOCDN) Delete(db *sqlx.DB, ctx context.Context) (error, tc.ApiErrorType) {
+	tx, err := db.Beginx()
+	defer func() {
+		if tx == nil {
+			return
+		}
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		tx.Commit()
+	}()
+
+	if err != nil {
+		log.Error.Printf("could not begin transaction: %v", err)
+		return tc.DBError, tc.SystemError
+	}
+	log.Debugf("about to run exec query: %s with cdn: %++v", deleteCDNQuery(), cdn)
+	result, err := tx.NamedExec(deleteCDNQuery(), cdn)
+	if err != nil {
+		log.Errorf("received error: %++v from delete execution", err)
+		return tc.DBError, tc.SystemError
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return tc.DBError, tc.SystemError
+	}
+	if rowsAffected != 1 {
+		if rowsAffected < 1 {
+			return errors.New("no cdn with that id found"), tc.DataMissingError
+		} else {
+			return fmt.Errorf("this create affected too many rows: %d", rowsAffected), tc.SystemError
+		}
+	}
+	return nil, tc.NoError
+}
+
+func updateCDNQuery() string {
+	query := `UPDATE
+cdn SET
+dnssec_enabled=:dnssec_enabled,
+domain_name=:domain_name,
+name=:name
+WHERE id=:id RETURNING last_updated`
+	return query
+}
+
+func insertCDNQuery() string {
+	query := `INSERT INTO cdn (
+dnssec_enabled,
+domain_name,
+name) VALUES (
+:dnssec_enabled,
+:domain_name,
+:name) RETURNING id,last_updated`
+	return query
+}
+
+func deleteCDNQuery() string {
+	query := `DELETE FROM cdn
+WHERE id=:id`
 	return query
 }
