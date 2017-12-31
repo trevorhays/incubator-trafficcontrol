@@ -32,6 +32,7 @@ import (
 	"github.com/apache/incubator-trafficcontrol/traffic_ops/traffic_ops_golang/api"
 	"github.com/apache/incubator-trafficcontrol/traffic_ops/traffic_ops_golang/auth"
 	"github.com/apache/incubator-trafficcontrol/traffic_ops/traffic_ops_golang/cdn"
+	"github.com/apache/incubator-trafficcontrol/traffic_ops/traffic_ops_golang/phys_location"
 	"github.com/basho/riak-go-client"
 )
 
@@ -97,8 +98,8 @@ func Routes(d ServerData) ([]Route, http.Handler, error) {
 		{1.2, http.MethodGet, `system/info/?(\.json)?$`, systemInfoHandler(d.DB), SystemInfoPrivLevel, Authenticated, nil},
 
 		//Phys_Locations
-		{1.2, http.MethodGet, `phys_locations/?(\.json)?$`, physLocationsHandler(d.DB), PhysLocationsPrivLevel, Authenticated, nil},
-		{1.2, http.MethodGet, `phys_locations/{id}$`, physLocationsHandler(d.DB), PhysLocationsPrivLevel, Authenticated, nil},
+		{1.2, http.MethodGet, `phys_locations/?(\.json)?$`, phys_location.PhysLocationsHandler(d.DB), phys_location.PhysLocationsPrivLevel, Authenticated, nil},
+		{1.2, http.MethodGet, `phys_locations/{id}$`, phys_location.PhysLocationsHandler(d.DB), phys_location.PhysLocationsPrivLevel, Authenticated, nil},
 	}
 	return routes, proxyHandler, nil
 }

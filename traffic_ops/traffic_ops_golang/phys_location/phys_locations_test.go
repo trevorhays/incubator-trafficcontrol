@@ -1,4 +1,4 @@
-package main
+package phys_location
 
 /*
  * Licensed to the Apache Software Foundation (ASF) under one

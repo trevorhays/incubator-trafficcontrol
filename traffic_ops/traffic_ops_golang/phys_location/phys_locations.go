@@ -1,4 +1,4 @@
-package main
+package phys_location
 
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
@@ -34,7 +34,7 @@ import (
 
 const PhysLocationsPrivLevel = 10
 
-func physLocationsHandler(db *sqlx.DB) http.HandlerFunc {
+func PhysLocationsHandler(db *sqlx.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		handleErr := func(err error, status int) {
 			log.Errorf("%v %v\n", r.RemoteAddr, err)
