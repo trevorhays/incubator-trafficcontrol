@@ -232,7 +232,7 @@ email=:email,
 name=:name,
 phone=:phone,
 poc=:poc,
-region=:region,
+region=:regionId,
 short_name=:short_name,
 state=:state,
 zip=:zip
@@ -260,7 +260,7 @@ zip) VALUES (
 :name,
 :phone,
 :poc,
-:region,
+:regionId,
 :short_name,
 :state,
 :zip) RETURNING id,last_updated`
