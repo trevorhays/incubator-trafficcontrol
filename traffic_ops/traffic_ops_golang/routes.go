@@ -100,6 +100,11 @@ func Routes(d ServerData) ([]Route, http.Handler, error) {
 		//Phys_Locations
 		{1.2, http.MethodGet, `phys_locations/?(\.json)?$`, phys_location.PhysLocationsHandler(d.DB), phys_location.PhysLocationsPrivLevel, Authenticated, nil},
 		{1.2, http.MethodGet, `phys_locations/{id}$`, phys_location.PhysLocationsHandler(d.DB), phys_location.PhysLocationsPrivLevel, Authenticated, nil},
+		//phys_locations generic handlers:
+        {1.3, http.MethodPut, `phys_locations/{id}$`, api.UpdateHandler(phys_location.GetRefType(), d.DB), phys_location.PhysLocationsPrivLevel, Authenticated, nil},
+        {1.3, http.MethodPost, `phys_locations/?$`, api.CreateHandler(phys_location.GetRefType(), d.DB), phys_location.PhysLocationsPrivLevel, Authenticated, nil},
+        {1.3, http.MethodDelete, `phys_locations/{id}$`, api.DeleteHandler(phys_location.GetRefType(), d.DB), phys_location.PhysLocationsPrivLevel, Authenticated, nil},
+
 	}
 	return routes, proxyHandler, nil
 }
