@@ -101,6 +101,7 @@ func (phys_location *TOPHYSLOCATION) Update(db *sqlx.DB, ctx context.Context) (e
 			return err, eType
 		} else {
 			log.Errorf("received error: %++v from update execution", err)
+			log.Errorf("%+v\n",phys_location)
 			return tc.DBError, tc.SystemError
 		}
 	}
