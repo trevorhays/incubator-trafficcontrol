@@ -93,6 +93,12 @@ public class DeliveryService {
 	private final boolean acceptHttp;
 	private final boolean acceptHttps;
 	private final boolean redirectToHttps;
+	private final DeepCachingType deepCache;
+
+	public enum DeepCachingType {
+		NEVER,
+		ALWAYS
+	}
 
 	public DeliveryService(final String id, final JsonNode dsJo) throws JsonUtilsException {
 		this.id = id;
@@ -144,7 +150,15 @@ public class DeliveryService {
 		acceptHttp = JsonUtils.optBoolean(protocol, "acceptHttp", true);
 		acceptHttps = JsonUtils.optBoolean(protocol, "acceptHttps");
 		redirectToHttps = JsonUtils.optBoolean(protocol, "redirectToHttps");
-
+		final String dctString = JsonUtils.optString(dsJo, "deepCachingType", "NEVER").toUpperCase();
+		DeepCachingType dct = DeepCachingType.NEVER;
+		try {
+			dct = DeepCachingType.valueOf(dctString);
+		} catch (IllegalArgumentException e) {
+			LOGGER.error("DeliveryService '" + id + "' has an unrecognized deepCachingType: '" + dctString + "'. Defaulting to 'NEVER' instead");
+		} finally {
+			this.deepCache = dct;
+		}
 	}
 
 	public String getId() {
@@ -388,6 +402,11 @@ public class DeliveryService {
 	public void setDns(final boolean isDns) {
 		this.isDns = isDns;
 	}
+
+	public DeepCachingType getDeepCache() {
+		return deepCache;
+	}
+
 
 	public boolean appendQueryString() {
 		return shouldAppendQueryString;

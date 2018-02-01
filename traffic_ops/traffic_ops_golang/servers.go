@@ -36,9 +36,6 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-// ServersPrivLevel - privileges for the /servers endpoint
-const ServersPrivLevel = 10
-
 func serversHandler(db *sqlx.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		handleErrs := tc.GetHandleErrorsFunc(w, r)
@@ -64,7 +61,7 @@ func serversHandler(db *sqlx.DB) http.HandlerFunc {
 			if k == `id` {
 				if _, err := strconv.Atoi(v); err != nil {
 					log.Errorf("Expected {id} to be an integer: %s", v)
-					handleErrs(http.StatusNotFound, errors.New("Resource not found.")) //matches perl response
+					handleErrs(http.StatusNotFound, errors.New("Resource not found")) //matches perl response
 					return
 				}
 			}

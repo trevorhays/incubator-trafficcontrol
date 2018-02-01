@@ -25,6 +25,8 @@ import (
 	"context"
 	"crypto/sha512"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -38,8 +40,10 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// ServerName - the server identifier
 const ServerName = "traffic_ops_golang" + "/" + Version
 
+// AuthBase ...
 type AuthBase struct {
 	noAuth                 bool
 	secret                 string
@@ -47,6 +51,7 @@ type AuthBase struct {
 	override               Middleware
 }
 
+// GetWrapper ...
 func (a AuthBase) GetWrapper(privLevelRequired int) Middleware {
 	if a.override != nil {
 		return a.override
@@ -69,34 +74,42 @@ func (a AuthBase) GetWrapper(privLevelRequired int) Middleware {
 				log.EventfRaw(`%s - %s [%s] "%v %v HTTP/1.1" %v %v %v "%v"`, r.RemoteAddr, username, time.Now().Format(AccessLogTimeFormat), r.Method, r.URL.Path, iw.code, iw.byteCount, int(time.Now().Sub(start)/time.Millisecond), r.UserAgent())
 			}()
 
-			handleUnauthorized := func(reason string) {
-				status := http.StatusUnauthorized
+			handleErr := func(status int, err error) {
+				errBytes, jsonErr := json.Marshal(tc.CreateErrorAlerts(err))
+				if jsonErr != nil {
+					log.Errorf("failed to marshal error: %s\n", jsonErr)
+					w.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprintf(w, http.StatusText(http.StatusInternalServerError))
+					return
+				}
+				w.Header().Set(tc.ContentType, tc.ApplicationJson)
 				w.WriteHeader(status)
-				fmt.Fprintf(w, http.StatusText(status))
-				log.Infof("%v %v %v %v returned unauthorized: %v\n", r.RemoteAddr, r.Method, r.URL.Path, username, reason)
+				fmt.Fprintf(w, "%s", errBytes)
 			}
 
 			cookie, err := r.Cookie(tocookie.Name)
 			if err != nil {
-				handleUnauthorized("error getting cookie: " + err.Error())
+				log.Errorf("error getting cookie: %s", err)
+				handleErr(http.StatusUnauthorized, errors.New("Unauthorized, please log in."))
 				return
 			}
 
 			if cookie == nil {
-				handleUnauthorized("no auth cookie")
+				handleErr(http.StatusUnauthorized, errors.New("Unauthorized, please log in."))
 				return
 			}
 
 			oldCookie, err := tocookie.Parse(a.secret, cookie.Value)
 			if err != nil {
-				handleUnauthorized("cookie error: " + err.Error())
+				log.Errorf("error parsing cookie: %s", err)
+				handleErr(http.StatusUnauthorized, errors.New("Unauthorized, please log in."))
 				return
 			}
 
 			username = oldCookie.AuthData
 			currentUserInfo := auth.GetCurrentUserFromDB(a.getCurrentUserInfoStmt, username)
 			if currentUserInfo.PrivLevel < privLevelRequired {
-				handleUnauthorized("insufficient privileges")
+				handleErr(http.StatusForbidden, errors.New("Forbidden."))
 				return
 			}
 
@@ -129,6 +142,7 @@ func wrapHeaders(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// AccessLogTimeFormat ...
 const AccessLogTimeFormat = "02/Jan/2006:15:04:05 -0700"
 
 func wrapAccessLog(secret string, h http.Handler) http.HandlerFunc {
@@ -219,17 +233,20 @@ func stripAllWhitespace(s string) string {
 	}, s)
 }
 
+// Interceptor ...
 type Interceptor struct {
 	w         http.ResponseWriter
 	code      int
 	byteCount int
 }
 
+// WriteHeader ...
 func (i *Interceptor) WriteHeader(rc int) {
 	i.w.WriteHeader(rc)
 	i.code = rc
 }
 
+// Write ...
 func (i *Interceptor) Write(b []byte) (int, error) {
 	wi, werr := i.w.Write(b)
 	i.byteCount += wi
@@ -239,6 +256,7 @@ func (i *Interceptor) Write(b []byte) (int, error) {
 	return wi, werr
 }
 
+// Header ...
 func (i *Interceptor) Header() http.Header {
 	return i.w.Header()
 }
@@ -249,20 +267,29 @@ type BodyInterceptor struct {
 	body []byte
 }
 
+// WriteHeader ...
 func (i *BodyInterceptor) WriteHeader(rc int) {
 	i.w.WriteHeader(rc)
 }
+
+// Write ...
 func (i *BodyInterceptor) Write(b []byte) (int, error) {
 	i.body = append(i.body, b...)
 	return len(b), nil
 }
+
+// Header ...
 func (i *BodyInterceptor) Header() http.Header {
 	return i.w.Header()
 }
+
+// RealWrite ...
 func (i *BodyInterceptor) RealWrite(b []byte) (int, error) {
 	wi, werr := i.w.Write(i.body)
 	return wi, werr
 }
+
+// Body ...
 func (i *BodyInterceptor) Body() []byte {
 	return i.body
 }

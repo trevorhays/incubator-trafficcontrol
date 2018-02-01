@@ -19,36 +19,17 @@ import java.io.File;
 import java.io.IOException;
 
 
-public class NetworkUpdater extends AbstractServiceUpdater {
+public class DeepNetworkUpdater extends NetworkUpdater {
 
-	public NetworkUpdater() {
+	public DeepNetworkUpdater() {
 		sourceCompressed = false;
-		tmpPrefix = "czf";
+		tmpPrefix = "deepczf";
 		tmpSuffix = ".json";
 	}
 
 	@Override
-	public boolean loadDatabase() throws IOException {
-		final File existingDB = databasesDirectory.resolve(databaseName).toFile();
-
-		if (!existingDB.exists() || !existingDB.canRead()) {
-			return false;
-		}
-
-		return generateTree(existingDB, false) != null;
-	}
-
-	@Override
-	public boolean verifyDatabase(final File dbFile) throws IOException {
-		if (!dbFile.exists() || !dbFile.canRead()) {
-			return false;
-		}
-
-		return generateTree(dbFile, true) != null;
-	}
-
 	public NetworkNode generateTree(final File dbFile, final boolean verifyOnly) throws IOException {
-		return NetworkNode.generateTree(dbFile, verifyOnly);
+		return NetworkNode.generateTree(dbFile, verifyOnly, true);
 	}
 
 }

@@ -35,7 +35,10 @@ import (
 	"github.com/basho/riak-go-client"
 )
 
+// Authenticated ...
 var Authenticated = true
+
+// NoAuth ...
 var NoAuth = false
 
 func handlerToFunc(handler http.Handler) http.HandlerFunc {
@@ -60,10 +63,10 @@ func Routes(d ServerData) ([]Route, http.Handler, error) {
 		{1.2, http.MethodGet, `cdns/health$`, handlerToFunc(proxyHandler), 0, NoAuth, []Middleware{}},
 		{1.2, http.MethodGet, `cdns/routing$`, handlerToFunc(proxyHandler), 0, NoAuth, []Middleware{}},
 
-		{1.2, http.MethodGet, `cdns/?(\.json)?$`, cdn.GetHandler(d.DB), cdn.CDNsPrivLevel, Authenticated, nil},
-		{1.2, http.MethodGet, `cdns/{id}$`, cdn.GetHandler(d.DB), cdn.CDNsPrivLevel, Authenticated, nil},
-		{1.2, http.MethodGet, `cdns/{name}/configs/monitoring(\.json)?$`, monitoringHandler(d.DB), MonitoringPrivLevel, Authenticated, nil},
+		{1.2, http.MethodGet, `cdns/{name}/configs/monitoring(\.json)?$`, monitoringHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
 		//CDN generic handlers:
+		{1.3, http.MethodGet, `cdns/?(\.json)?$`, api.ReadHandler(cdn.GetRefType(), d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
+		{1.3, http.MethodGet, `cdns/{id}$`, api.ReadHandler(cdn.GetRefType(), d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
 		{1.3, http.MethodPut, `cdns/{id}$`, api.UpdateHandler(cdn.GetRefType(), d.DB), auth.PrivLevelOperations, Authenticated, nil},
 		{1.3, http.MethodPost, `cdns/?$`, api.CreateHandler(cdn.GetRefType(), d.DB), auth.PrivLevelOperations, Authenticated, nil},
 		{1.3, http.MethodDelete, `cdns/{id}$`, api.DeleteHandler(cdn.GetRefType(), d.DB), auth.PrivLevelOperations, Authenticated, nil},
@@ -74,14 +77,14 @@ func Routes(d ServerData) ([]Route, http.Handler, error) {
 		{1.3, http.MethodPut, `deliveryservices/{xmlID}/urisignkeys$`, saveDeliveryServiceURIKeysHandler(d.DB, d.Config), auth.PrivLevelAdmin, Authenticated, nil},
 		{1.3, http.MethodDelete, `deliveryservices/{xmlID}/urisignkeys$`, removeDeliveryServiceURIKeysHandler(d.DB, d.Config), auth.PrivLevelAdmin, Authenticated, nil},
 		//Divisions
-		{1.2, http.MethodGet, `divisions/?(\.json)?$`, divisionsHandler(d.DB), DivisionsPrivLevel, Authenticated, nil},
+		{1.2, http.MethodGet, `divisions/?(\.json)?$`, divisionsHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
 		//HwInfo
-		{1.2, http.MethodGet, `hwinfo-wip/?(\.json)?$`, hwInfoHandler(d.DB), HWInfoPrivLevel, Authenticated, nil},
+		{1.2, http.MethodGet, `hwinfo-wip/?(\.json)?$`, hwInfoHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
 		//Parameters
-		{1.3, http.MethodGet, `parameters/?(\.json)?$`, parametersHandler(d.DB), ParametersPrivLevel, Authenticated, nil},
+		{1.3, http.MethodGet, `parameters/?(\.json)?$`, parametersHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
 		//Regions
-		{1.2, http.MethodGet, `regions/?(\.json)?$`, regionsHandler(d.DB), RegionsPrivLevel, Authenticated, nil},
-		{1.2, http.MethodGet, `regions/{id}$`, regionsHandler(d.DB), RegionsPrivLevel, Authenticated, nil},
+		{1.2, http.MethodGet, `regions/?(\.json)?$`, regionsHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
+		{1.2, http.MethodGet, `regions/{id}$`, regionsHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
 		//Servers
 		// explicitly passed to legacy system until fully implemented.  Auth handled by legacy system.
 		{1.2, http.MethodGet, `servers/checks$`, handlerToFunc(proxyHandler), 0, NoAuth, []Middleware{}},
@@ -89,24 +92,24 @@ func Routes(d ServerData) ([]Route, http.Handler, error) {
 		{1.2, http.MethodGet, `servers/status$`, handlerToFunc(proxyHandler), 0, NoAuth, []Middleware{}},
 		{1.2, http.MethodGet, `servers/totals$`, handlerToFunc(proxyHandler), 0, NoAuth, []Middleware{}},
 
-		{1.2, http.MethodGet, `servers/?(\.json)?$`, serversHandler(d.DB), ServersPrivLevel, Authenticated, nil},
-		{1.2, http.MethodGet, `servers/{id}$`, serversHandler(d.DB), ServersPrivLevel, Authenticated, nil},
+		{1.2, http.MethodGet, `servers/?(\.json)?$`, serversHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
+		{1.2, http.MethodGet, `servers/{id}$`, serversHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
 		{1.2, http.MethodPost, `servers/{id}/deliveryservices$`, assignDeliveryServicesToServerHandler(d.DB), auth.PrivLevelOperations, Authenticated, nil},
 		{1.2, http.MethodGet, `servers/{host_name}/update_status$`, getServerUpdateStatusHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
 
 		//SSLKeys deliveryservice endpoints here that are marked  marked as '-wip' need to have tenancy checks added
-		{1.2, http.MethodGet, `deliveryservices-wip/xmlId/{xmlID}/sslkeys$`, getDeliveryServiceSSLKeysByXmlIDHandler(d.DB, d.Config), auth.PrivLevelAdmin, Authenticated, nil},
+		{1.2, http.MethodGet, `deliveryservices-wip/xmlId/{xmlID}/sslkeys$`, getDeliveryServiceSSLKeysByXMLIDHandler(d.DB, d.Config), auth.PrivLevelAdmin, Authenticated, nil},
 		{1.2, http.MethodGet, `deliveryservices-wip/hostname/{hostName}/sslkeys$`, getDeliveryServiceSSLKeysByHostNameHandler(d.DB, d.Config), auth.PrivLevelAdmin, Authenticated, nil},
-		{1.2, http.MethodPut, `deliveryservices-wip/hostname/{hostName}/sslkeys$`, addDeliveryServiceSSLKeysHandler(d.DB, d.Config), auth.PrivLevelAdmin, Authenticated, nil},
+		{1.2, http.MethodPost, `deliveryservices-wip/hostname/{hostName}/sslkeys/add$`, addDeliveryServiceSSLKeysHandler(d.DB, d.Config), auth.PrivLevelAdmin, Authenticated, nil},
 		//Statuses
-		{1.2, http.MethodGet, `statuses/?(\.json)?$`, statusesHandler(d.DB), StatusesPrivLevel, Authenticated, nil},
-		{1.2, http.MethodGet, `statuses/{id}$`, statusesHandler(d.DB), StatusesPrivLevel, Authenticated, nil},
+		{1.2, http.MethodGet, `statuses/?(\.json)?$`, statusesHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
+		{1.2, http.MethodGet, `statuses/{id}$`, statusesHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
 		//System
-		{1.2, http.MethodGet, `system/info/?(\.json)?$`, systemInfoHandler(d.DB), SystemInfoPrivLevel, Authenticated, nil},
+		{1.2, http.MethodGet, `system/info/?(\.json)?$`, systemInfoHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
 
 		//Phys_Locations
-		{1.2, http.MethodGet, `phys_locations/?(\.json)?$`, physLocationsHandler(d.DB), PhysLocationsPrivLevel, Authenticated, nil},
-		{1.2, http.MethodGet, `phys_locations/{id}$`, physLocationsHandler(d.DB), PhysLocationsPrivLevel, Authenticated, nil},
+		{1.2, http.MethodGet, `phys_locations/?(\.json)?$`, physLocationsHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
+		{1.2, http.MethodGet, `phys_locations/{id}$`, physLocationsHandler(d.DB), auth.PrivLevelReadOnly, Authenticated, nil},
 	}
 	return routes, proxyHandler, nil
 }
@@ -156,6 +159,7 @@ func CreateThrottledHandler(handler http.Handler, maxConcurrentCalls int) Thrott
 	return ThrottledHandler{handler, make(chan struct{}, maxConcurrentCalls)}
 }
 
+// ThrottledHandler ...
 type ThrottledHandler struct {
 	Handler http.Handler
 	ReqChan chan struct{}

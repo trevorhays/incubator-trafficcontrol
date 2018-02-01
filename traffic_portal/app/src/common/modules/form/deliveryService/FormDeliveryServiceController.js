@@ -69,6 +69,16 @@ var FormDeliveryServiceController = function(deliveryService, type, types, $scop
         return currentType.name.indexOf(category) != -1;
     });
 
+    $scope.clientSteeringType = _.findWhere(types, {name: "CLIENT_STEERING"});
+    $scope.isClientSteering = function(ds) {
+        if (ds.typeId == $scope.clientSteeringType.id) {
+            return true;
+        } else {
+            ds.trResponseHeaders = "";
+            return false;
+        }
+    };
+
     $scope.falseTrue = [
         { value: true, label: 'true' },
         { value: false, label: 'false' }
@@ -127,6 +137,11 @@ var FormDeliveryServiceController = function(deliveryService, type, types, $scop
         { value: 48, label: '48  - CS6' },
         { value: 56, label: '56  - CS7' }
     ];
+
+    $scope.deepCachingTypes = [
+        { value: 'NEVER', label: 'NEVER' },
+        { value: 'ALWAYS', label: 'ALWAYS' }
+    ]
 
     $scope.dispersions = [
         { value: 1, label: '1 - OFF' },

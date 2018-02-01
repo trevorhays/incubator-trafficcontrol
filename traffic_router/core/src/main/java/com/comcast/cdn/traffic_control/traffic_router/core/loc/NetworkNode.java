@@ -20,11 +20,12 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Iterator;
-import java.util.Map;
-import java.util.TreeMap;
-import java.util.List;
 import java.util.ArrayList;
-
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
 
 import com.comcast.cdn.traffic_control.traffic_router.core.util.CidrAddress;
 import com.comcast.cdn.traffic_control.traffic_router.core.util.JsonUtils;
@@ -42,12 +43,14 @@ public class NetworkNode implements Comparable<NetworkNode> {
     private static final String DEFAULT_SUB_STR = "0.0.0.0/0";
 
     private static NetworkNode instance;
+    private static NetworkNode deepInstance;
 
     private CidrAddress cidrAddress;
     private String loc;
     private CacheLocation cacheLocation = null;
     private Geolocation geolocation = null;
     protected Map<NetworkNode,NetworkNode> children;
+    private Set<String> deepCacheNames;
 
     public static NetworkNode getInstance() {
         if (instance != null) {
@@ -63,15 +66,38 @@ public class NetworkNode implements Comparable<NetworkNode> {
         return instance;
     }
 
-    public static NetworkNode generateTree(final File f, final boolean verifyOnly) throws IOException {
-        final ObjectMapper mapper = new ObjectMapper();
-        return generateTree(mapper.readTree(f), verifyOnly);
+    public static NetworkNode getDeepInstance() {
+        if (deepInstance != null) {
+            return deepInstance;
+        }
+
+        try {
+            deepInstance = new NetworkNode(DEFAULT_SUB_STR);
+        } catch (NetworkNodeException e) {
+            LOGGER.warn(e);
+        }
+
+        return deepInstance;
     }
 
-    @SuppressWarnings("PMD.CyclomaticComplexity")
+    public static NetworkNode generateTree(final File f, final boolean verifyOnly, final boolean useDeep) throws IOException  {
+        final ObjectMapper mapper = new ObjectMapper();
+        return generateTree(mapper.readTree(f), verifyOnly, useDeep);
+    }
+
+    public static NetworkNode generateTree(final File f, final boolean verifyOnly) throws IOException  {
+        return generateTree(f, verifyOnly, false);
+    }
+
     public static NetworkNode generateTree(final JsonNode json, final boolean verifyOnly) {
+        return generateTree(json, verifyOnly, false);
+    }
+
+    @SuppressWarnings({"PMD.CyclomaticComplexity", "PMD.NPathComplexity"})
+    public static NetworkNode generateTree(final JsonNode json, final boolean verifyOnly, final boolean useDeep) {
         try {
-            final JsonNode coverageZones = JsonUtils.getJsonNode(json, "coverageZones");
+            final String czKey = useDeep ? "deepCoverageZones" : "coverageZones";
+            final JsonNode coverageZones = JsonUtils.getJsonNode(json, czKey);
 
             final SuperNode root = new SuperNode();
 
@@ -88,39 +114,17 @@ public class NetworkNode implements Comparable<NetworkNode> {
                     geolocation = new Geolocation(latitude, longitude);
                 }
 
-                try {
-                    for (final JsonNode network6 : JsonUtils.getJsonNode(locData, "network6")) {
-                        final String ip = network6.asText();
-
-                        try {
-                            root.add6(new NetworkNode(ip, loc, geolocation));
-                        } catch (NetworkNodeException ex) {
-                            LOGGER.error(ex, ex);
-                            return null;
-                        }
-                    }
-                } catch (JsonUtilsException ex) {
-                    LOGGER.warn("An exception was caught while accessing the network6 key of " + loc + " in the incoming coverage zone file: " + ex.getMessage());
-                }
-
-                try {
-                    for (final JsonNode network : JsonUtils.getJsonNode(locData, "network")) {
-                        final String ip = network.asText();
-
-                        try {
-                            root.add(new NetworkNode(ip, loc, geolocation));
-                        } catch (NetworkNodeException ex) {
-                            LOGGER.error(ex, ex);
-                            return null;
-                        }
-                    }
-                } catch (JsonUtilsException ex) {
-                    LOGGER.warn("An exception was caught while accessing the network key of " + loc + " in the incoming coverage zone file: " + ex.getMessage());
+                if (!addNetworkNodesToRoot(root, loc, locData, geolocation, useDeep)) {
+                    return null;
                 }
             }
 
             if (!verifyOnly) {
-                instance = root;
+                if (useDeep) {
+                    deepInstance = root;
+                } else {
+                    instance = root;
+                }
             }
 
             return root;
@@ -131,6 +135,62 @@ public class NetworkNode implements Comparable<NetworkNode> {
         }
 
         return null;
+    }
+
+    private static boolean addNetworkNodesToRoot(final SuperNode root, final String loc, final JsonNode locData,
+                                                 final Geolocation geolocation, final boolean useDeep) {
+        final CacheLocation deepLoc = new CacheLocation( "deep." + loc, geolocation != null ? geolocation : new Geolocation(0.0, 0.0));  // TODO JvD
+        final Set<String> cacheNames = parseDeepCacheNames(locData);
+
+        for (final String key : new String[]{"network6", "network"}) {
+            try {
+                for (final JsonNode network : JsonUtils.getJsonNode(locData, key)) {
+                    final String ip = network.asText();
+
+                    try {
+                        final NetworkNode nn = new NetworkNode(ip, loc, geolocation);
+                        if (useDeep) {
+                            // For a deep NetworkNode, we set the CacheLocation here without any Caches.
+                            // The deep Caches will be lazily loaded in getCoverageZoneCacheLocation() where we have
+                            // access to the latest CacheRegister, similar to how normal NetworkNodes are lazily loaded
+                            // with a CacheLocation.
+                            nn.setDeepCacheNames(cacheNames);
+                            nn.setCacheLocation(deepLoc);
+                        }
+                        if ("network6".equals(key)) {
+                            root.add6(nn);
+                        } else {
+                            root.add(nn);
+                        }
+                    } catch (NetworkNodeException ex) {
+                        LOGGER.error(ex, ex);
+                        return false;
+                    }
+                }
+            } catch (JsonUtilsException ex) {
+                LOGGER.warn("An exception was caught while accessing the " + key + " key of " + loc + " in the incoming coverage zone file: " + ex.getMessage());
+            }
+        }
+        return true;
+    }
+
+    private static Set<String> parseDeepCacheNames(final JsonNode locationData) {
+        final Set<String> cacheNames = new HashSet<String>();
+        final JsonNode cacheArray;
+
+        try {
+            cacheArray = JsonUtils.getJsonNode(locationData, "caches");
+        } catch (JsonUtilsException ex) {
+            return cacheNames;
+        }
+
+        for (final JsonNode cache : cacheArray) {
+            final String cacheName = cache.asText();
+            if (!cacheName.isEmpty()) {
+                cacheNames.add(cacheName);
+            }
+        }
+        return cacheNames;
     }
 
     public NetworkNode(final String str) throws NetworkNodeException {
@@ -229,6 +289,14 @@ public class NetworkNode implements Comparable<NetworkNode> {
         this.cacheLocation = cacheLocation;
     }
 
+    public Set<String> getDeepCacheNames() {
+        return deepCacheNames;
+    }
+
+    public void setDeepCacheNames(final Set<String> deepCacheNames) {
+        this.deepCacheNames = deepCacheNames;
+    }
+
     public int size() {
         if (children == null) {
             return 1;
@@ -244,22 +312,30 @@ public class NetworkNode implements Comparable<NetworkNode> {
     }
 
     public void clearCacheLocations() {
+        clearCacheLocations(false);
+    }
+
+    public void clearCacheLocations(final boolean clearCachesOnly) {
         synchronized(this) {
-            cacheLocation = null;
+            if (clearCachesOnly && cacheLocation != null) {
+                cacheLocation.clearCaches();
+            } else {
+                cacheLocation = null;
+            }
 
             if (this instanceof SuperNode) {
                 final SuperNode superNode = (SuperNode) this;
 
                 if (superNode.children6 != null) {
                     for (final NetworkNode child : superNode.children6.keySet()) {
-                        child.clearCacheLocations();
+                        child.clearCacheLocations(clearCachesOnly);
                     }
                 }
             }
 
             if (children != null) {
                 for (final NetworkNode child : children.keySet()) {
-                    child.clearCacheLocations();
+                    child.clearCacheLocations(clearCachesOnly);
                 }
             }
         }

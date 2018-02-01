@@ -33,8 +33,6 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-const ParametersPrivLevel = auth.PrivLevelReadOnly
-
 func parametersHandler(db *sqlx.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		handleErrs := tc.GetHandleErrorsFunc(w, r)
@@ -133,6 +131,7 @@ LEFT JOIN profile pr ON pp.profile = pr.id`
 	return query
 }
 
+// ParametersGroupBy ...
 func ParametersGroupBy() string {
 	groupBy := ` GROUP BY p.config_file, p.id, p.last_updated, p.name, p.value, p.secure`
 	return groupBy

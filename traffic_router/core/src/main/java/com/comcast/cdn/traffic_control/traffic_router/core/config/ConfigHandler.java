@@ -36,6 +36,7 @@ import com.comcast.cdn.traffic_control.traffic_router.core.loc.FederationsWatche
 import com.comcast.cdn.traffic_control.traffic_router.core.loc.GeolocationDatabaseUpdater;
 import com.comcast.cdn.traffic_control.traffic_router.core.loc.NetworkNode;
 import com.comcast.cdn.traffic_control.traffic_router.core.loc.NetworkUpdater;
+import com.comcast.cdn.traffic_control.traffic_router.core.loc.DeepNetworkUpdater;
 import com.comcast.cdn.traffic_control.traffic_router.core.loc.RegionalGeoUpdater;
 
 import com.comcast.cdn.traffic_control.traffic_router.core.secure.CertificatesPoller;
@@ -76,6 +77,7 @@ public class ConfigHandler {
 	private TrafficOpsUtils trafficOpsUtils;
 
 	private NetworkUpdater networkUpdater;
+	private DeepNetworkUpdater deepNetworkUpdater;
 	private FederationsWatcher federationsWatcher;
 	private RegionalGeoUpdater regionalGeoUpdater;
 	private SteeringWatcher steeringWatcher;
@@ -101,6 +103,9 @@ public class ConfigHandler {
 	}
 	public NetworkUpdater getNetworkUpdater () {
 		return networkUpdater;
+	}
+	public DeepNetworkUpdater getDeepNetworkUpdater () {
+		return deepNetworkUpdater;
 	}
 
 	public RegionalGeoUpdater getRegionalGeoUpdater() {
@@ -141,6 +146,7 @@ public class ConfigHandler {
 			try {
 				parseGeolocationConfig(config);
 				parseCoverageZoneNetworkConfig(config);
+				parseDeepCoverageZoneNetworkConfig(config);
 				parseRegionalGeoConfig(jo);
 
 				final CacheRegister cacheRegister = new CacheRegister();
@@ -214,8 +220,13 @@ public class ConfigHandler {
 				 * never have traffic routed to it, as the old List<Cache> does not contain the Cache that was moved to ONLINE.
 				 * NetworkNode is a singleton and is managed asynchronously. As long as we swap out the CacheRegister first,
 				 * then clear cache locations, the lazy loading should work as designed. See issue TC-401 for details.
+				 *
+				 * Update for DDC (Dynamic Deep Caching): NetworkNode now has a 2nd singleton (deepInstance) that is managed
+				 * similarly to the non-deep instance. However, instead of clearing a NetworkNode's CacheLocation, only the
+				 * Caches are cleared from the CacheLocation then lazily loaded at request time.
 				 */
 				NetworkNode.getInstance().clearCacheLocations();
+				NetworkNode.getDeepInstance().clearCacheLocations(true);
 				setLastSnapshotTimestamp(sts);
 			} catch (ParseException e) {
 				isProcessing.set(false);
@@ -250,6 +261,9 @@ public class ConfigHandler {
 	}
 	public void setNetworkUpdater(final NetworkUpdater nu) {
 		this.networkUpdater = nu;
+	}
+	public void setDeepNetworkUpdater(final DeepNetworkUpdater dnu) {
+		this.deepNetworkUpdater = dnu;
 	}
 
 	public void setRegionalGeoUpdater(final RegionalGeoUpdater regionalGeoUpdater) {
@@ -539,6 +553,13 @@ public class ConfigHandler {
 				JsonUtils.getString(config, "coveragezone.polling.url"),
 				JsonUtils.optLong(config, "coveragezone.polling.interval")
 			);
+	}
+
+	private void parseDeepCoverageZoneNetworkConfig(final JsonNode config) throws JsonUtilsException {
+		getDeepNetworkUpdater().setDataBaseURL(
+			JsonUtils.optString(config, "deepcoveragezone.polling.url", null),
+			JsonUtils.optLong(config, "deepcoveragezone.polling.interval")
+		);
 	}
 
 	private void parseRegionalGeoConfig(final JsonNode jo) throws JsonUtilsException {
